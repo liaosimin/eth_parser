@@ -24,8 +24,8 @@ type Transaction struct {
 // EthereumParser represents the Ethereum blockchain parser
 type EthereumParser struct {
 	currentBlock int
-	addresses    []string
-	transactions map[string][]Transaction
+	addresses    map[string]bool
+	transactions map[string][]*Transaction
 }
 
 // GetCurrentBlock returns the last parsed block
@@ -35,30 +35,17 @@ func (p *EthereumParser) GetCurrentBlock() int {
 
 // Subscribe adds an address to the observer
 func (p *EthereumParser) Subscribe(address string) bool {
-	if !p.isAddressSubscribed(address) {
-		p.addresses = append(p.addresses, address)
-		return true
-	}
-	return false
+	p.addresses[address] = true
+	return true
 }
 
 // GetTransactions returns a list of inbound or outbound transactions for an address
-func (p *EthereumParser) GetTransactions(address string) []Transaction {
+func (p *EthereumParser) GetTransactions(address string) []*Transaction {
 	transactions, exists := p.transactions[address]
 	if exists {
 		return transactions
 	}
-	return []Transaction{}
-}
-
-// isAddressSubscribed checks if an address is already subscribed
-func (p *EthereumParser) isAddressSubscribed(address string) bool {
-	for _, addr := range p.addresses {
-		if addr == address {
-			return true
-		}
-	}
-	return false
+	return nil
 }
 
 // parseBlock parses the transactions in a block and updates the internal data structure
@@ -75,6 +62,11 @@ func (p *EthereumParser) parseBlock(blockNumber int) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		fmt.Println("Error reading HTTP response:", err)
+		return
+	}
+
+	if response.StatusCode != http.StatusOK {
+		fmt.Println("HTTP request failed with status:", response.Status)
 		return
 	}
 
@@ -101,18 +93,20 @@ func (p *EthereumParser) parseBlock(blockNumber int) {
 			Value:    transactionData["value"].(string),
 			GasPrice: transactionData["gasPrice"].(string),
 		}
-		p.updateTransactions(transaction)
+		p.updateTransactions(&transaction)
 	}
 
 	p.currentBlock = blockNumber
 }
 
 // updateTransactions updates the internal data structure with a new transaction
-func (p *EthereumParser) updateTransactions(transaction Transaction) {
-	for _, addr := range p.addresses {
-		if transaction.From == addr || transaction.To == addr {
-			p.transactions[addr] = append(p.transactions[addr], transaction)
-		}
+func (p *EthereumParser) updateTransactions(transaction *Transaction) {
+	if ok := p.addresses[transaction.From]; ok {
+		p.transactions[transaction.From] = append(p.transactions[transaction.From], transaction)
+	}
+
+	if ok := p.addresses[transaction.To]; ok {
+		p.transactions[transaction.To] = append(p.transactions[transaction.To], transaction)
 	}
 }
 
@@ -120,8 +114,8 @@ func main() {
 	// Create an instance of EthereumParser
 	parser := EthereumParser{
 		currentBlock: 0,
-		addresses:    []string{},
-		transactions: make(map[string][]Transaction),
+		addresses:    make(map[string]bool),
+		transactions: make(map[string][]*Transaction),
 	}
 
 	// Subscribe to an address
